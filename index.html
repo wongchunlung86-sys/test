@@ -41,17 +41,24 @@
     <script type="module">
         // 導入 Firebase 功能
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, onSnapshot, setDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const { useState, useEffect, useRef } = React;
 
-        // Firebase 配置與初始化
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-merch-app';
+        // 安全地獲取 Firebase 配置 (防止因為變數未定義導致白屏)
+        let db, auth, appId;
+        try {
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            if (firebaseConfig) {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            }
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'default-merch-app';
+        } catch (e) {
+            console.error("Firebase init failed:", e);
+        }
 
         const APP_CONFIG = {
             pageTitle: "我的週邊收藏庫",
@@ -96,34 +103,59 @@
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingProduct, setEditingProduct] = useState(null);
             const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
             const fileInputRef = useRef(null);
 
-            // 1. 處理身份驗證
+            // 1. 處理身份驗證 (遵守 Rule 3: Auth Before Queries)
             useEffect(() => {
+                if (!auth) {
+                    setError("Firebase 配置尚未準備就緒，請重整頁面。");
+                    return;
+                }
+
                 const initAuth = async () => {
                     try {
-                        await signInAnonymously(auth);
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
                     } catch (error) {
-                        console.error("Auth error", error);
+                        console.error("Auth error:", error);
+                        // 指數退避重試邏輯可以加在此處，這裡先簡單顯示錯誤
+                        setError("登入失敗，正在嘗試重新連線...");
                     }
                 };
+                
                 initAuth();
-                const unsubscribe = onAuthStateChanged(auth, setUser);
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    if (u) setError(null);
+                });
                 return () => unsubscribe();
             }, []);
 
-            // 2. 處理資料監聽 (Firestore)
+            // 2. 處理資料監聽 (遵守 Rule 1 & 2)
             useEffect(() => {
-                if (!user) return;
+                if (!user || !db) return;
 
+                // Path: /artifacts/{appId}/users/{userId}/merch
                 const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'merch');
-                const unsubscribe = onSnapshot(colRef, (snapshot) => {
-                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setProducts(data);
-                    setLoading(false);
-                }, (error) => {
-                    console.error("Firestore error", error);
-                });
+                
+                const unsubscribe = onSnapshot(colRef, 
+                    (snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setProducts(data);
+                        setLoading(false);
+                    }, 
+                    (err) => {
+                        console.error("Firestore error:", err);
+                        // 不要使用 alert，改用狀態顯示
+                        if (err.code === 'permission-denied') {
+                            setError("權限不足或連線逾時，請檢查網路。");
+                        }
+                    }
+                );
 
                 return () => unsubscribe();
             }, [user]);
@@ -142,7 +174,7 @@
                     category: APP_CONFIG.categories[1],
                     series: '',
                     memo: '',
-                    image: '' // 預設空白，由使用者上傳
+                    image: '' 
                 });
                 setIsModalOpen(true);
             };
@@ -157,7 +189,7 @@
                     await setDoc(docRef, editingProduct);
                     closeModal();
                 } catch (error) {
-                    console.error("Save error", error);
+                    console.error("Save error:", error);
                 }
             };
 
@@ -168,15 +200,16 @@
                     await deleteDoc(docRef);
                     closeModal();
                 } catch (error) {
-                    console.error("Delete error", error);
+                    console.error("Delete error:", error);
                 }
             };
 
             const handleImageUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    if (file.size > 1048576) { // 限制 1MB
-                        alert("圖片太大了，請選擇小於 1MB 的照片。");
+                    if (file.size > 1048576) { 
+                        setError("圖片大於 1MB，請縮小後再上傳。");
+                        setTimeout(() => setError(null), 3000);
                         return;
                     }
                     const reader = new FileReader();
@@ -191,6 +224,20 @@
                 (p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.series?.toLowerCase().includes(searchQuery.toLowerCase())) &&
                 (activeTab === APP_CONFIG.categories[0] || p.category === activeTab)
             );
+
+            // 錯誤畫面
+            if (error && !user) {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center bg-white">
+                        <div className="text-red-500 text-5xl mb-4">⚠️</div>
+                        <h2 className="text-xl font-bold mb-2">發生了一些問題</h2>
+                        <p className="text-gray-500 mb-6">{error}</p>
+                        <button onClick={() => window.location.reload()} className="bg-blue-500 text-white px-6 py-2 rounded-full font-bold">
+                            重新載入
+                        </button>
+                    </div>
+                );
+            }
 
             return (
                 <div className="max-w-md mx-auto min-h-screen pb-24 bg-[#F2F2F7]">
@@ -208,6 +255,8 @@
                     </header>
 
                     <main className="pt-32 px-4">
+                        {error && <div className="bg-red-100 text-red-600 p-3 rounded-lg mb-4 text-sm">{error}</div>}
+                        
                         <div className="bg-gray-200 rounded-xl flex items-center px-3 py-2 mb-4">
                             <SearchIcon />
                             <input 
@@ -231,7 +280,10 @@
                         </div>
 
                         {loading ? (
-                            <div className="text-center py-10 text-gray-400">載入中...</div>
+                            <div className="text-center py-10 text-gray-400">
+                                <div className="animate-spin inline-block w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full mb-2"></div>
+                                <p>資料連線中...</p>
+                            </div>
                         ) : (
                             <div className="grid grid-cols-2 gap-4">
                                 {filteredProducts.map(product => (
