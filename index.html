@@ -3,23 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    
-    <!-- 1. 這裡更改瀏覽器分頁顯示的名稱 -->
     <title>我的週邊收藏庫</title>
     
     <!-- iOS PWA 標籤 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    
-    <!-- 2. 這裡更改手機桌面圖示下方的名稱 -->
     <meta name="apple-mobile-web-app-title" content="週邊管理">
-    
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3081/3081913.png">
 
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body {
@@ -32,20 +33,28 @@
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .modal-animate { animation: slideUp 0.3s ease-out; }
-        @supports (-webkit-touch-callout: none) { .pwa-padding { padding-top: env(safe-area-inset-top); } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
-    <script type="text/babel">
+    <script type="module">
+        // 導入 Firebase 功能
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, onSnapshot, setDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
         const { useState, useEffect, useRef } = React;
 
-        // ==========================================
-        // 設定區：您可以直接在這裡修改所有名稱
-        // ==========================================
+        // Firebase 配置與初始化
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-merch-app';
+
         const APP_CONFIG = {
-            pageTitle: "我的週邊收藏庫", // 網頁標題
+            pageTitle: "我的週邊收藏庫",
             categories: ['すべて', 'アクリル', '缶バッジ', 'アパレル', '生活雑貨', 'その他'],
             ui: {
                 mainTitle: "收藏清單",
@@ -66,18 +75,6 @@
             }
         };
 
-        const INITIAL_PRODUCTS = [
-            { 
-                id: '1', 
-                name: 'フルカラーアクリルスタンド', 
-                category: 'アクリル', 
-                series: '呪術廻戰', 
-                memo: '第一彈預約商品', 
-                image: 'https://images.unsplash.com/photo-1613913317924-d2e8736f8613?w=400' 
-            }
-        ];
-
-        // --- 組件邏輯開始 ---
         const SearchIcon = () => (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
         );
@@ -91,15 +88,46 @@
         );
 
         function App() {
-            const [products, setProducts] = useState(INITIAL_PRODUCTS);
+            const [user, setUser] = useState(null);
+            const [products, setProducts] = useState([]);
             const [searchQuery, setSearchQuery] = useState('');
             const [activeTab, setActiveTab] = useState(APP_CONFIG.categories[0]);
             const [scrolled, setScrolled] = useState(false);
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingProduct, setEditingProduct] = useState(null);
+            const [loading, setLoading] = useState(true);
             const fileInputRef = useRef(null);
 
-            // 動態修改網頁標題
+            // 1. 處理身份驗證
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        await signInAnonymously(auth);
+                    } catch (error) {
+                        console.error("Auth error", error);
+                    }
+                };
+                initAuth();
+                const unsubscribe = onAuthStateChanged(auth, setUser);
+                return () => unsubscribe();
+            }, []);
+
+            // 2. 處理資料監聽 (Firestore)
+            useEffect(() => {
+                if (!user) return;
+
+                const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'merch');
+                const unsubscribe = onSnapshot(colRef, (snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setProducts(data);
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Firestore error", error);
+                });
+
+                return () => unsubscribe();
+            }, [user]);
+
             useEffect(() => {
                 document.title = APP_CONFIG.pageTitle;
                 const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -114,31 +142,43 @@
                     category: APP_CONFIG.categories[1],
                     series: '',
                     memo: '',
-                    image: 'https://images.unsplash.com/photo-1572375992501-4b0892d50c69?w=400'
+                    image: '' // 預設空白，由使用者上傳
                 });
                 setIsModalOpen(true);
             };
 
             const closeModal = () => setIsModalOpen(false);
 
-            const handleSave = () => {
-                if (!editingProduct.name) return;
-                if (products.find(p => p.id === editingProduct.id)) {
-                    setProducts(products.map(p => p.id === editingProduct.id ? editingProduct : p));
-                } else {
-                    setProducts([editingProduct, ...products]);
+            const handleSave = async () => {
+                if (!editingProduct.name || !user) return;
+                
+                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'merch', editingProduct.id);
+                try {
+                    await setDoc(docRef, editingProduct);
+                    closeModal();
+                } catch (error) {
+                    console.error("Save error", error);
                 }
-                closeModal();
             };
 
-            const handleDelete = () => {
-                setProducts(products.filter(p => p.id !== editingProduct.id));
-                closeModal();
+            const handleDelete = async () => {
+                if (!user) return;
+                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'merch', editingProduct.id);
+                try {
+                    await deleteDoc(docRef);
+                    closeModal();
+                } catch (error) {
+                    console.error("Delete error", error);
+                }
             };
 
             const handleImageUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
+                    if (file.size > 1048576) { // 限制 1MB
+                        alert("圖片太大了，請選擇小於 1MB 的照片。");
+                        return;
+                    }
                     const reader = new FileReader();
                     reader.onloadend = () => {
                         setEditingProduct({ ...editingProduct, image: reader.result });
@@ -147,18 +187,14 @@
                 }
             };
 
-            const triggerFileInput = () => {
-                fileInputRef.current.click();
-            };
-
             const filteredProducts = products.filter(p => 
-                (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.series.toLowerCase().includes(searchQuery.toLowerCase())) &&
+                (p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.series?.toLowerCase().includes(searchQuery.toLowerCase())) &&
                 (activeTab === APP_CONFIG.categories[0] || p.category === activeTab)
             );
 
             return (
                 <div className="max-w-md mx-auto min-h-screen pb-24 bg-[#F2F2F7]">
-                    <header className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 pwa-padding ${scrolled ? 'bg-white/80 ios-blur border-b border-gray-300 h-16' : 'bg-transparent h-28'}`}>
+                    <header className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 ${scrolled ? 'bg-white/80 ios-blur border-b border-gray-300 h-16' : 'bg-transparent h-28'}`}>
                         <div className="max-w-md mx-auto h-full px-4 flex items-end justify-between pb-2">
                             <h1 className={`font-bold transition-all duration-300 ${scrolled ? 'text-lg w-full text-center' : 'text-3xl'}`}>
                                 {APP_CONFIG.ui.mainTitle}
@@ -194,18 +230,24 @@
                             ))}
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            {filteredProducts.map(product => (
-                                <div key={product.id} onClick={() => openModal(product)} className="bg-white rounded-2xl overflow-hidden shadow-sm active:opacity-70 transition-opacity">
-                                    <div className="h-36 bg-cover bg-center bg-gray-100" style={{ backgroundImage: `url(${product.image})` }} />
-                                    <div className="p-3">
-                                        <span className="text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded text-blue-600">{product.series}</span>
-                                        <h3 className="font-bold text-sm mt-1 truncate">{product.name}</h3>
-                                        <p className="text-[11px] text-gray-400 mt-1 truncate">{product.category}</p>
+                        {loading ? (
+                            <div className="text-center py-10 text-gray-400">載入中...</div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-4">
+                                {filteredProducts.map(product => (
+                                    <div key={product.id} onClick={() => openModal(product)} className="bg-white rounded-2xl overflow-hidden shadow-sm active:opacity-70 transition-opacity">
+                                        <div className="h-36 bg-cover bg-center bg-gray-100 flex items-center justify-center overflow-hidden" style={{ backgroundImage: product.image ? `url(${product.image})` : 'none' }}>
+                                            {!product.image && <ImageIcon />}
+                                        </div>
+                                        <div className="p-3">
+                                            <span className="text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded text-blue-600">{product.series}</span>
+                                            <h3 className="font-bold text-sm mt-1 truncate">{product.name}</h3>
+                                            <p className="text-[11px] text-gray-400 mt-1 truncate">{product.category}</p>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        )}
                     </main>
 
                     {isModalOpen && (
@@ -218,12 +260,11 @@
                                     <button onClick={handleSave} className="text-blue-500 font-bold text-lg">{APP_CONFIG.ui.btnDone}</button>
                                 </div>
                                 
-                                <div className="flex-1 overflow-y-auto p-4">
-                                    {/* 圖片上傳區域 */}
+                                <div className="flex-1 overflow-y-auto p-4 pb-20">
                                     <div className="bg-white rounded-xl overflow-hidden mb-6 p-4 flex flex-col items-center">
                                         <div 
                                             className="w-full h-48 rounded-lg bg-gray-100 bg-cover bg-center mb-4 flex items-center justify-center border-2 border-dashed border-gray-200"
-                                            style={{ backgroundImage: `url(${editingProduct.image})` }}
+                                            style={{ backgroundImage: editingProduct.image ? `url(${editingProduct.image})` : 'none' }}
                                         >
                                             {!editingProduct.image && <span className="text-gray-400 text-sm">No Image</span>}
                                         </div>
@@ -235,7 +276,7 @@
                                             onChange={handleImageUpload} 
                                         />
                                         <button 
-                                            onClick={triggerFileInput}
+                                            onClick={() => fileInputRef.current.click()}
                                             className="flex items-center gap-2 text-blue-500 font-semibold py-2 px-4 rounded-lg bg-blue-50 active:scale-95 transition-transform"
                                         >
                                             <ImageIcon />
@@ -265,7 +306,7 @@
                                         <textarea className="w-full h-24 outline-none resize-none" value={editingProduct.memo} onChange={e => setEditingProduct({...editingProduct, memo: e.target.value})} placeholder={APP_CONFIG.ui.fieldMemo + "..."} />
                                     </div>
 
-                                    <button onClick={handleDelete} className="w-full bg-white text-red-500 py-4 rounded-xl font-bold active:bg-gray-100">
+                                    <button onClick={handleDelete} className="w-full bg-white text-red-500 py-4 rounded-xl font-bold active:bg-gray-100 mb-10">
                                         {APP_CONFIG.ui.btnDelete}
                                     </button>
                                 </div>
