@@ -1,300 +1,288 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>グッズ管理システム</title>
+    
+    <!-- iOS PWA 必備標籤 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="グッズ管理">
+    
+    <!-- App 圖示 (建議準備一張 192x192 的圖片網址) -->
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3081/3081913.png">
 
-    <!-- 1. 這裡更改瀏覽器分頁顯示的名稱 -->
-    <title>我的週邊收藏庫</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #F2F2F7;
+            -webkit-tap-highlight-color: transparent;
+            /* 防止 iOS 橡皮筋效果拉動背景 */
+            overscroll-behavior-y: none;
+        }
 
-    <!-- iOS PWA 標籤 -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        .ios-blur {
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
 
-    <!-- 2. 這裡更改手機桌面圖示下方的名稱 -->
-    <meta name="apple-mobile-web-app-title" content="週邊管理">
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
 
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3081/3081913.png">
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
 
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background-color: #F2F2F7;
-            -webkit-tap-highlight-color: transparent;
-            overscroll-behavior-y: none;
-        }
-        .ios-blur { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        .modal-animate { animation: slideUp 0.3s ease-out; }
-        @supports (-webkit-touch-callout: none) { .pwa-padding { padding-top: env(safe-area-inset-top); } }
-    </style>
+        .modal-animate {
+            animation: slideUp 0.3s ease-out;
+        }
+
+        /* 調整 PWA 下的頂部間距，避免擋到狀態欄 */
+        @supports (-webkit-touch-callout: none) {
+            .pwa-padding {
+                padding-top: env(safe-area-inset-top);
+            }
+        }
+    </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
-        const { useState, useEffect, useRef } = React;
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-        // ==========================================
-        // 設定區：您可以直接在這裡修改所有名稱
-        // ==========================================
-        const APP_CONFIG = {
-            pageTitle: "我的週邊收藏庫", // 網頁標題
-            categories: ['すべて', 'アクリル', '缶バッジ', 'アパレル', '生活雑貨', 'その他'],
-            ui: {
-                mainTitle: "收藏清單",
-                searchPlaceholder: "検索...",
-                btnCancel: "キャンセル",
-                btnDone: "完了",
-                btnDelete: "削除",
-                modalTitle: "商品情報",
-                fieldName: "商品名",
-                fieldSeries: "作品名",
-                fieldCategory: "カテゴリ",
-                fieldMemo: "Memo",
-                fieldPlaceholder: "未入力",
-                btnUpload: "画像をアップロード",
-                navHome: "一覧",
-                navStats: "製造",
-                navSettings: "設定"
-            }
-        };
+        // --- アイコン組件 ---
+        const SearchIcon = () => (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        );
 
-        const INITIAL_PRODUCTS = [
-            { 
-                id: '1', 
-                name: 'フルカラーアクリルスタンド', 
-                category: 'アクリル', 
-                series: '呪術廻戰', 
-                memo: '第一彈預約商品', 
-                image: 'https://images.unsplash.com/photo-1613913317924-d2e8736f8613?w=400' 
-            }
-        ];
+        const AddIcon = () => (
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#007AFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        );
 
-        // --- 組件邏輯開始 ---
-        const SearchIcon = () => (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        );
+        // --- 初期データ ---
+        const INITIAL_PRODUCTS = [
+            { id: '1', name: 'フルカラーアクリルスタンド', category: 'アクリル', material: '3mm 透明アクリル', processing: '両面インクジェット印刷', memo: '第一弾予約商品。品質に注意。', series: '呪術廻戦', image: 'https://images.unsplash.com/photo-1613913317924-d2e8736f8613?w=400' },
+            { id: '2', name: 'ブリキ缶バッジ', category: '缶バッジ', material: 'ブリキ / マットフィルム', processing: 'マットサンドラメ加工', memo: 'イベント限定版。安全ピン仕様。', series: 'SPY×FAMILY', image: 'https://images.unsplash.com/photo-1591543622403-108294b9359a?w=400' },
+            { id: '3', name: '刺繍ベースボールキャップ', category: 'アパレル', material: '綿100% キャンバス', processing: '平刺繍', memo: 'ロゴの太さを調整。', series: 'オリジナル', image: 'https://images.unsplash.com/photo-1588850561407-ed78c282e89b?w=400' },
+            { id: '4', name: 'セラミックマグカップ', category: '生活雑貨', material: '強化磁器', processing: '感温変色プリント', memo: 'お湯を入れると絵柄が出現。', series: 'ポケモン', image: 'https://images.unsplash.com/photo-1514228742587-6b1558fbed20?w=400' },
+        ];
 
-        const AddIcon = () => (
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#007AFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-        );
+        const CATEGORIES = ['すべて', 'アクリル', '缶バッジ', 'アパレル', '生活雑貨', 'その他'];
 
-        const ImageIcon = () => (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-        );
+        function App() {
+            const [products, setProducts] = useState(INITIAL_PRODUCTS);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [activeTab, setActiveTab] = useState('すべて');
+            const [scrolled, setScrolled] = useState(false);
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [editingProduct, setEditingProduct] = useState(null);
 
-        function App() {
-            const [products, setProducts] = useState(INITIAL_PRODUCTS);
-            const [searchQuery, setSearchQuery] = useState('');
-            const [activeTab, setActiveTab] = useState(APP_CONFIG.categories[0]);
-            const [scrolled, setScrolled] = useState(false);
-            const [isModalOpen, setIsModalOpen] = useState(false);
-            const [editingProduct, setEditingProduct] = useState(null);
-            const fileInputRef = useRef(null);
+            useEffect(() => {
+                const handleScroll = () => setScrolled(window.scrollY > 20);
+                window.addEventListener('scroll', handleScroll);
+                return () => window.removeEventListener('scroll', handleScroll);
+            }, []);
 
-            // 動態修改網頁標題
-            useEffect(() => {
-                document.title = APP_CONFIG.pageTitle;
-                const handleScroll = () => setScrolled(window.scrollY > 20);
-                window.addEventListener('scroll', handleScroll);
-                return () => window.removeEventListener('scroll', handleScroll);
-            }, []);
+            const openModal = (product = null) => {
+                setEditingProduct(product ? { ...product } : {
+                    id: Date.now().toString(),
+                    name: '',
+                    category: 'アクリル',
+                    series: '',
+                    material: '',
+                    processing: '',
+                    memo: '',
+                    image: 'https://images.unsplash.com/photo-1572375992501-4b0892d50c69?w=400'
+                });
+                setIsModalOpen(true);
+            };
 
-            const openModal = (product = null) => {
-                setEditingProduct(product ? { ...product } : {
-                    id: Date.now().toString(),
-                    name: '',
-                    category: APP_CONFIG.categories[1],
-                    series: '',
-                    memo: '',
-                    image: 'https://images.unsplash.com/photo-1572375992501-4b0892d50c69?w=400'
-                });
-                setIsModalOpen(true);
-            };
+            const closeModal = () => setIsModalOpen(false);
 
-            const closeModal = () => setIsModalOpen(false);
+            const handleSave = () => {
+                if (!editingProduct.name) return;
+                if (products.find(p => p.id === editingProduct.id)) {
+                    setProducts(products.map(p => p.id === editingProduct.id ? editingProduct : p));
+                } else {
+                    setProducts([editingProduct, ...products]);
+                }
+                closeModal();
+            };
 
-            const handleSave = () => {
-                if (!editingProduct.name) return;
-                if (products.find(p => p.id === editingProduct.id)) {
-                    setProducts(products.map(p => p.id === editingProduct.id ? editingProduct : p));
-                } else {
-                    setProducts([editingProduct, ...products]);
-                }
-                closeModal();
-            };
+            const handleDelete = () => {
+                setProducts(products.filter(p => p.id !== editingProduct.id));
+                closeModal();
+            };
 
-            const handleDelete = () => {
-                setProducts(products.filter(p => p.id !== editingProduct.id));
-                closeModal();
-            };
+            const filteredProducts = products.filter(p => 
+                (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.series.toLowerCase().includes(searchQuery.toLowerCase())) &&
+                (activeTab === 'すべて' || p.category === activeTab)
+            );
 
-            const handleImageUpload = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        setEditingProduct({ ...editingProduct, image: reader.result });
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
+            return (
+                <div className="max-w-md mx-auto min-h-screen pb-24 bg-[#F2F2F7]">
+                    {/* Header */}
+                    <header className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 pwa-padding ${scrolled ? 'bg-white/80 ios-blur border-b border-gray-300 h-16' : 'bg-transparent h-28'}`}>
+                        <div className="max-w-md mx-auto h-full px-4 flex items-end justify-between pb-2">
+                            <h1 className={`font-bold transition-all duration-300 ${scrolled ? 'text-lg w-full text-center' : 'text-3xl'}`}>
+                                グッズ管理
+                            </h1>
+                            {!scrolled && (
+                                <button onClick={() => openModal()} className="text-blue-500 mb-1 active:opacity-50">
+                                    <AddIcon />
+                                </button>
+                            )}
+                        </div>
+                    </header>
 
-            const triggerFileInput = () => {
-                fileInputRef.current.click();
-            };
+                    <main className="pt-32 px-4">
+                        {/* Search Bar */}
+                        <div className="bg-gray-200 rounded-xl flex items-center px-3 py-2 mb-4">
+                            <SearchIcon />
+                            <input 
+                                className="bg-transparent border-none outline-none ml-2 text-[17px] w-full"
+                                placeholder="検索..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                        </div>
 
-            const filteredProducts = products.filter(p => 
-                (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.series.toLowerCase().includes(searchQuery.toLowerCase())) &&
-                (activeTab === APP_CONFIG.categories[0] || p.category === activeTab)
-            );
+                        {/* Tabs */}
+                        <div className="flex overflow-x-auto hide-scrollbar gap-2 mb-6">
+                            {CATEGORIES.map(tab => (
+                                <button 
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab)}
+                                    className={`px-4 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'}`}
+                                >
+                                    {tab}
+                                </button>
+                            ))}
+                        </div>
 
-            return (
-                <div className="max-w-md mx-auto min-h-screen pb-24 bg-[#F2F2F7]">
-                    <header className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 pwa-padding ${scrolled ? 'bg-white/80 ios-blur border-b border-gray-300 h-16' : 'bg-transparent h-28'}`}>
-                        <div className="max-w-md mx-auto h-full px-4 flex items-end justify-between pb-2">
-                            <h1 className={`font-bold transition-all duration-300 ${scrolled ? 'text-lg w-full text-center' : 'text-3xl'}`}>
-                                {APP_CONFIG.ui.mainTitle}
-                            </h1>
-                            {!scrolled && (
-                                <button onClick={() => openModal()} className="text-blue-500 mb-1 active:opacity-50">
-                                    <AddIcon />
-                                </button>
-                            )}
-                        </div>
-                    </header>
+                        {/* Grid */}
+                        <div className="grid grid-cols-2 gap-4">
+                            {filteredProducts.map(product => (
+                                <div 
+                                    key={product.id} 
+                                    onClick={() => openModal(product)}
+                                    className="bg-white rounded-2xl overflow-hidden shadow-sm active:opacity-70 transition-opacity"
+                                >
+                                    <div 
+                                        className="h-36 bg-cover bg-center bg-gray-100"
+                                        style={{ backgroundImage: `url(${product.image})` }}
+                                    />
+                                    <div className="p-3">
+                                        <span className="text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded text-blue-600">
+                                            {product.series}
+                                        </span>
+                                        <h3 className="font-bold text-sm mt-1 truncate">{product.name}</h3>
+                                        <p className="text-[11px] text-gray-400 mt-1 truncate">
+                                            {product.category}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </main>
 
-                    <main className="pt-32 px-4">
-                        <div className="bg-gray-200 rounded-xl flex items-center px-3 py-2 mb-4">
-                            <SearchIcon />
-                            <input 
-                                className="bg-transparent border-none outline-none ml-2 text-[17px] w-full"
-                                placeholder={APP_CONFIG.ui.searchPlaceholder}
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                            />
-                        </div>
+                    {/* Modal */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-end">
+                            <div className="absolute inset-0 bg-black/40" onClick={closeModal} />
+                            <div className="relative w-full max-w-md mx-auto bg-[#F2F2F7] rounded-t-2xl h-[92vh] flex flex-col modal-animate overflow-hidden">
+                                <div className="flex justify-between items-center px-4 py-3 bg-white border-b border-gray-300">
+                                    <button onClick={closeModal} className="text-blue-500 text-lg">キャンセル</button>
+                                    <h2 className="font-bold">商品情報</h2>
+                                    <button onClick={handleSave} className="text-blue-500 font-bold text-lg">完了</button>
+                                </div>
+                                
+                                <div className="flex-1 overflow-y-auto p-4">
+                                    <div className="bg-white rounded-xl overflow-hidden mb-6">
+                                        <div className="flex items-center px-4 py-3 border-b border-gray-100">
+                                            <label className="w-24 text-gray-800">商品名</label>
+                                            <input 
+                                                className="flex-1 text-right outline-none"
+                                                value={editingProduct.name}
+                                                onChange={e => setEditingProduct({...editingProduct, name: e.target.value})}
+                                                placeholder="未入力"
+                                            />
+                                        </div>
+                                        <div className="flex items-center px-4 py-3 border-b border-gray-100">
+                                            <label className="w-24 text-gray-800">作品名</label>
+                                            <input 
+                                                className="flex-1 text-right outline-none"
+                                                value={editingProduct.series}
+                                                onChange={e => setEditingProduct({...editingProduct, series: e.target.value})}
+                                                placeholder="作品・シリーズ"
+                                            />
+                                        </div>
+                                        <div className="flex items-center px-4 py-3">
+                                            <label className="w-24 text-gray-800">カテゴリ</label>
+                                            <select 
+                                                className="flex-1 bg-transparent text-right outline-none appearance-none"
+                                                value={editingProduct.category}
+                                                onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
+                                            >
+                                                {CATEGORIES.filter(c => c !== 'すべて').map(c => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
 
-                        <div className="flex overflow-x-auto hide-scrollbar gap-2 mb-6">
-                            {APP_CONFIG.categories.map(tab => (
-                                <button 
-                                    key={tab}
-                                    onClick={() => setActiveTab(tab)}
-                                    className={`px-4 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'}`}
-                                >
-                                    {tab}
-                                </button>
-                            ))}
-                        </div>
+                                    <div className="bg-white rounded-xl p-4 mb-6">
+                                        <label className="block text-gray-400 text-xs mb-2 uppercase">Memo</label>
+                                        <textarea 
+                                            className="w-full h-24 outline-none resize-none"
+                                            value={editingProduct.memo}
+                                            onChange={e => setEditingProduct({...editingProduct, memo: e.target.value})}
+                                            placeholder="詳細メモ..."
+                                        />
+                                    </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            {filteredProducts.map(product => (
-                                <div key={product.id} onClick={() => openModal(product)} className="bg-white rounded-2xl overflow-hidden shadow-sm active:opacity-70 transition-opacity">
-                                    <div className="h-36 bg-cover bg-center bg-gray-100" style={{ backgroundImage: `url(${product.image})` }} />
-                                    <div className="p-3">
-                                        <span className="text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded text-blue-600">{product.series}</span>
-                                        <h3 className="font-bold text-sm mt-1 truncate">{product.name}</h3>
-                                        <p className="text-[11px] text-gray-400 mt-1 truncate">{product.category}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </main>
+                                    <button 
+                                        onClick={handleDelete}
+                                        className="w-full bg-white text-red-500 py-4 rounded-xl font-bold active:bg-gray-100"
+                                    >
+                                        削除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
-                    {isModalOpen && (
-                        <div className="fixed inset-0 z-50 flex items-end">
-                            <div className="absolute inset-0 bg-black/40" onClick={closeModal} />
-                            <div className="relative w-full max-w-md mx-auto bg-[#F2F2F7] rounded-t-2xl h-[92vh] flex flex-col modal-animate overflow-hidden">
-                                <div className="flex justify-between items-center px-4 py-3 bg-white border-b border-gray-300">
-                                    <button onClick={closeModal} className="text-blue-500 text-lg">{APP_CONFIG.ui.btnCancel}</button>
-                                    <h2 className="font-bold">{APP_CONFIG.ui.modalTitle}</h2>
-                                    <button onClick={handleSave} className="text-blue-500 font-bold text-lg">{APP_CONFIG.ui.btnDone}</button>
-                                </div>
+                    {/* Footer Nav */}
+                    <nav className="fixed bottom-0 left-0 right-0 h-20 bg-white/80 ios-blur border-t border-gray-300">
+                        <div className="max-w-md mx-auto h-full flex justify-around items-center pb-4 text-[10px] text-gray-400">
+                            <div className="flex flex-col items-center text-blue-500">
+                                <div className="w-6 h-6 mb-1 bg-blue-500 rounded-md"></div>
+                                <span>一覧</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                                <div className="w-6 h-6 mb-1 bg-gray-200 rounded-md"></div>
+                                <span>製造</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                                <div className="w-6 h-6 mb-1 bg-gray-200 rounded-md"></div>
+                                <span>設定</span>
+                            </div>
+                        </div>
+                    </nav>
+                </div>
+            );
+        }
 
-                                <div className="flex-1 overflow-y-auto p-4">
-                                    {/* 圖片上傳區域 */}
-                                    <div className="bg-white rounded-xl overflow-hidden mb-6 p-4 flex flex-col items-center">
-                                        <div 
-                                            className="w-full h-48 rounded-lg bg-gray-100 bg-cover bg-center mb-4 flex items-center justify-center border-2 border-dashed border-gray-200"
-                                            style={{ backgroundImage: `url(${editingProduct.image})` }}
-                                        >
-                                            {!editingProduct.image && <span className="text-gray-400 text-sm">No Image</span>}
-                                        </div>
-                                        <input 
-                                            type="file" 
-                                            accept="image/*" 
-                                            className="hidden" 
-                                            ref={fileInputRef} 
-                                            onChange={handleImageUpload} 
-                                        />
-                                        <button 
-                                            onClick={triggerFileInput}
-                                            className="flex items-center gap-2 text-blue-500 font-semibold py-2 px-4 rounded-lg bg-blue-50 active:scale-95 transition-transform"
-                                        >
-                                            <ImageIcon />
-                                            {APP_CONFIG.ui.btnUpload}
-                                        </button>
-                                    </div>
-
-                                    <div className="bg-white rounded-xl overflow-hidden mb-6">
-                                        <div className="flex items-center px-4 py-3 border-b border-gray-100">
-                                            <label className="w-24 text-gray-800">{APP_CONFIG.ui.fieldName}</label>
-                                            <input className="flex-1 text-right outline-none" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} placeholder={APP_CONFIG.ui.fieldPlaceholder} />
-                                        </div>
-                                        <div className="flex items-center px-4 py-3 border-b border-gray-100">
-                                            <label className="w-24 text-gray-800">{APP_CONFIG.ui.fieldSeries}</label>
-                                            <input className="flex-1 text-right outline-none" value={editingProduct.series} onChange={e => setEditingProduct({...editingProduct, series: e.target.value})} placeholder={APP_CONFIG.ui.fieldSeries} />
-                                        </div>
-                                        <div className="flex items-center px-4 py-3">
-                                            <label className="w-24 text-gray-800">{APP_CONFIG.ui.fieldCategory}</label>
-                                            <select className="flex-1 bg-transparent text-right outline-none appearance-none" value={editingProduct.category} onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}>
-                                                {APP_CONFIG.categories.filter(c => c !== APP_CONFIG.categories[0]).map(c => <option key={c} value={c}>{c}</option>)}
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <div className="bg-white rounded-xl p-4 mb-6">
-                                        <label className="block text-gray-400 text-xs mb-2 uppercase">{APP_CONFIG.ui.fieldMemo}</label>
-                                        <textarea className="w-full h-24 outline-none resize-none" value={editingProduct.memo} onChange={e => setEditingProduct({...editingProduct, memo: e.target.value})} placeholder={APP_CONFIG.ui.fieldMemo + "..."} />
-                                    </div>
-
-                                    <button onClick={handleDelete} className="w-full bg-white text-red-500 py-4 rounded-xl font-bold active:bg-gray-100">
-                                        {APP_CONFIG.ui.btnDelete}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    <nav className="fixed bottom-0 left-0 right-0 h-20 bg-white/80 ios-blur border-t border-gray-300">
-                        <div className="max-w-md mx-auto h-full flex justify-around items-center pb-4 text-[10px] text-gray-400">
-                            <div className="flex flex-col items-center text-blue-500">
-                                <div className="w-6 h-6 mb-1 bg-blue-500 rounded-md"></div>
-                                <span>{APP_CONFIG.ui.navHome}</span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                                <div className="w-6 h-6 mb-1 bg-gray-200 rounded-md"></div>
-                                <span>{APP_CONFIG.ui.navStats}</span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                                <div className="w-6 h-6 mb-1 bg-gray-200 rounded-md"></div>
-                                <span>{APP_CONFIG.ui.navSettings}</span>
-                            </div>
-                        </div>
-                    </nav>
-                </div>
-            );
-        }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
+</html>
